@@ -6,56 +6,65 @@ import re
 import time
 import sys
 
+# 常量区
+word_schema = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+Unicode_bt = 'utf-8'
+# Rule_Filename = 'rules'
+
 Rule_DirPath = sys.argv[1]#输入文件夹的路径,命令行的第二个参数
 Data_DirPath = sys.argv[2]#输出文件夹的路径，命令行的第三个参数
 
 Rule_Filename = Rule_DirPath + 'rules'
 Docx_Filename = Data_DirPath + 'origin.docx'
 
-word_schema='{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
-Unicode_bt ='utf-8'
-# Rule_Filename='rules'
+# 全局
+rules_dct = {}      # 规则字典
+part = {}          # 论文粗略分后字典
+locate = {}         # 论文细分后字典
 
+# 读取文件到rules_dct字典,
 def read_rules(filename):
-    f = open(filename,'r')
-    rules_dct={}        
-    for line in f: #f为unicode
+    f = open(filename, 'r', encoding="utf-8")
+    rules_dct.clear()
+    for line in f:  # f为unicode
         if line.startswith('{'):
-            group=line[1:-3].split(',')
+            group = line[1:-3].split(',')
             for factor in group:
                 _key = factor[:factor.index(':')]
                 _val = factor[factor.index(':')+1:]
                 if _key == 'key':
                     rule_dkey = _val
-                    rules_dct.setdefault(_val,{})
-                if _key!= 'key':
-                    rules_dct[rule_dkey].setdefault(_key,_val)
+                    rules_dct.setdefault(_val, {})
+                else:
+                    rules_dct[rule_dkey].setdefault(_key, _val)
     f.close()
-    return rules_dct
 
-#获取节点包含的文本内容
+# 获取节点包含的文本内容，由t标签标识
 def get_ptext(w_p):
     ptext = ''
-#-modified by zqd 20160125-----------------------
+# -modified by zqd 20160125-----------------------
     for node in w_p.iter(tag="%s%s"%(word_schema,"t")):
-        ptext += node.text
+        if node.text:
+            ptext += node.text
     return ptext
 
+# 迭代器，获取在my_tree结点下的type_char后代结点
 def _iter(my_tree,type_char):
     for node in my_tree.iter(tag=etree.Element):
         if _check_element_is(node,type_char):
             yield node
 
+#判断当前节点element是不是type_char结点
 def _check_element_is(element,type_char):
     return element.tag == '%s%s' % (word_schema,type_char)
 
+# 第一次遍历整个论文，将整篇论文分为大体几个大部分，此处为论文开题报告，划分为封面，目录，主题，参考文献，附录
 def first_locate():
     paraNum = 0
     part[1] = 'cover'
-    reference = []
     current_part = ''
     inmenu = True
-    for paragr in xml_tree.iter(tag = '%s%s'%(word_schema,"p")):
+    for paragr in _iter(xml_tree,'p'):
         paraNum += 1
         text = get_ptext(paragr)
         if current_part == 'menu':
@@ -66,35 +75,18 @@ def first_locate():
                 inmenu = False
         if not text or text == ' ' or text == '':
             continue
-        if '论文封面书脊' in text:
-            current_part = part[paraNum] = 'spine'
-        elif text.startswith("北京航空航天大学") or '本科生毕业设计（论文）任务书' in text:
-            current_part = part[paraNum] = 'taskbook'
-        elif '本人声明' in text:
-            current_part = part[paraNum] = 'statement'
-        elif re.compile(r'摘 *要').match(text) and 'abstract' not in part.values():
-            current_part = part[paraNum] = 'abstract'
-        elif ('Abstract' in text or 'abstract' in text or 'ABSTRACT' in text) and 'abstract_en' not in part.values():
-            current_part = part[paraNum] = 'abstract_en'
-        elif re.compile(r'目 *录').match(text) or re.compile(r'图 *目 *录').match(text) or re.compile(r'表 *目 *录').match(text) or re.compile(r'图 *表 *目 *录').match(text):
+        if re.compile(r'目 *录').match(text) or re.compile(r'图 *目 *录').match(text) or re.compile(r'表 *目 *录').match(text) or re.compile(r'图 *表 *目 *录').match(text):
             current_part = part[paraNum] = 'menu'
-        elif (current_part == 'menu' and inmenu == False):
+        elif current_part!='body'and ((current_part == 'menu' and inmenu == False) or get_level(paragr) == 0 or (current_part !='menu' and re.match(r'绪 *论',text))):
             current_part = part[paraNum] = 'body'
         elif text == '参考文献':
             current_part = part[paraNum] = 'refer'
         elif text.startswith('附录'):
             current_part = part[paraNum] = 'appendix'
-    if not 'statement' in part.values():
-        print('warning: statement doesnot exsit')
-    if not 'spine' in part.values():
-        print('warning: spine')
-    if not 'abstract' in part.values():
-        print('warning: abstract')
     if not 'body' in part.values():
-        print('warning: body')
+        print('warning: 主体不存在')
     if not 'menu' in part.values():
-        print('warning: menu')
-    return reference
+        print('warning: 目录不存在')
 
 # 得到标题的等级
 def get_level(w_p):
@@ -121,7 +113,7 @@ def get_level(w_p):
                                         styleID = style_node.get('%s%s' % (word_schema, 'val'))
                                         flag = 1
 
-#在判别文本以什么开头的方法上使用了正则表达式
+# 在判别文本以什么开头的方法上使用了正则表达式
 def analyse(text):
     text=text.strip(' ')
     if text.isdigit():
@@ -131,7 +123,6 @@ def analyse(text):
     pat3 = re.compile('[0-9]+\\.[0-9]\\.[0-9]')#以X.X.X开头的正则表达式
     pat4 = re.compile('图(\s)*[0-9]+((\\.|-)[0-9])*')#图标题的正则表达式
     pat5 = re.compile('表(\s)*[0-9]+((\\.|-)[0-9])*')#表标题的正则表达式
-
     #20160107 zqd -----------------------------------------------------------------------
     if pat1.match(text) and len(text)<70:
         if pat1.sub('',text)[0] == ' ':
@@ -168,14 +159,13 @@ def analyse(text):
 #  zqd--------------------------------------------------------------------------------
     return sort
 
+# 第二次遍历整篇论文，在大体几个部分下面细分
 def second_locate():
     paraNum = 0
     locate[1] = 'cover1'
     cur_part = ''
     cur_state = 'cover1'
-    title = ''
     warnInfo=[]
-    last_text = ''
     mentioned = []
     ref_num = 0
     inmenu = True
@@ -214,58 +204,11 @@ def second_locate():
                 cur_state = locate[paraNum] = 'cover2'
             elif  cur_state == 'cover2':
                 cur_state = locate[paraNum] = 'cover3'
-                title = text
+                #title = text
             elif '院'in text and'系'in text and '名称'in text:
                 cur_state = locate[paraNum] = 'cover4'
             elif '年'in text and '月'in text:
                 cur_state = locate[paraNum] = 'cover5'
-        elif cur_part == 'spine':
-            if '论文封面书脊' in text:
-                cur_state = locate[paraNum] = 'cover6'
-            else:
-                cur_state = locate[paraNum] = 'spine1'#不用处理了
-        elif cur_part == "taskbook":
-            cur_state = locate[paraNum] = "taskbook"
-        elif cur_part == 'statement':
-            if text == '本人声明':
-                cur_state = locate[paraNum] = 'statm1'
-            elif text.startswith('我声明'):
-                cur_state = locate[paraNum] = 'statm2'
-            elif '作者'in text:
-                cur_state = locate[paraNum] = 'statm3'
-            elif '时间' in text and  '年'in text  and '月' in text:
-                last_text = text
-            elif '时间'in last_text and  '年' in last_text and '月' in last_text and(title in text or text in title):
-                last_text = ''
-                cur_state = locate[paraNum] = 'abstr1'
-            elif '学' and '生'in text:
-                cur_state = locate[paraNum] = 'abstr2'
-        elif cur_part == 'abstract':
-            if re.match(r'摘 *要',text):
-                cur_state = locate[paraNum] = 'abstr3'
-                last_text = text
-            elif re.match(r'摘 *要',last_text):
-                last_text = ''
-                cur_state = locate[paraNum] = 'abstr4'
-            elif '关键词'in text or '关键字'in text:
-                cur_state = locate[paraNum] = 'abstr5'
-                last_text = text
-            elif cur_state == 'abstr5':
-                last_text = ''
-                cur_state = locate[paraNum] = 'abstr1'
-            elif 'Author' in text:
-                cur_state = locate[paraNum] = 'abstr2'
-        elif cur_part == 'abstract_en':
-            if text == 'ABSTRACT' or text == "Abstract" or text == 'abstract':
-                cur_state = locate[paraNum] = 'abstr3'
-                last_text = text
-            elif (last_text == 'ABSTRACT' or last_text == 'Abstract' or text=="abstract")\
-                 and 'Author'not in text and 'Tutor'not in text:
-                cur_state = locate[paraNum] = 'abstr4'
-                last_text = ''
-            elif (('KEY'in text or 'key' in text or "Key" in text) and ('WORD'in text or'word' in text))\
-                 or ('keyword'in text or 'Keyword'in text or'KEYWORD'in text):
-                cur_state = locate[paraNum] = 'abstr5'
         elif cur_part == 'menu':
             if re.match(r'目 *录',text)or re.compile(r'图 *目 *录').match(text) or re.compile(r'表 *目 *录').match(text) or re.compile(r'图 *表 *目 *录').match(text):
                 cur_state = locate[paraNum] = 'menuTitle'
@@ -282,7 +225,6 @@ def second_locate():
                 cur_part = 'body'
         elif cur_part == 'body':
             #得到级别，先按级别走，如果级别为普通，则按正则走。
-            #print paraNum
             level = get_level(paragr)
             analyse_result = analyse(text)
             if analyse_result in['firstLv_e','secondLv_e','thirdLv_e']:
@@ -291,11 +233,9 @@ def second_locate():
         #-------follow----hsy--modifies on July.13.2016
             if analyse_result is 'objectT':
                 if cur_state != 'object':
-                    #print 'warning',text
                     warnInfo.append('   warning: 图标题前没有直接对应的图')
             if cur_state is 'object':
                 if analyse_result != 'objectT':
-                    #print 'warning',text
                     warnInfo.append('   warning: 图后没有对应的图注。')
         #------end---------------------
             if level == '0':
@@ -556,15 +496,6 @@ def check_out(rule,to_check,locate,paraNum,paragr):
                   'cover4':['fontCN','fontSize','fontShape'],
                   'cover5':['fontCN','fontSize','fontShape','paraAlign','paraIsIntent'],
                   'cover6':['fontCN','fontSize','fontShape','paraAlign'],
-                  'statm1':position,
-                  'statm2':position,
-                  'statm3':position,
-                  'abstr1':position,
-                  'abstr2':position,
-                  'abstr3':position,
-                  'abstr4':position,
-                  'abstr5':position,
-                  'abstr6':position,
                   'menuTitle':position,
                   'menuFirst':['fontCN','fontSize','fontShape'],
                   'menuSecond':['fontCN','fontSize','fontShape'],
@@ -582,320 +513,176 @@ def check_out(rule,to_check,locate,paraNum,paragr):
                   'tableTitle':['fontCN','fontEN','fontSize','fontShape','paraGrade','paraAlign','paraIsIntent'],
                   'reference':position}
     if locate in checkItemDct.keys():
-        #关键词这里比较特殊，要深入para内部分析run的rpr来看关键词内容的格式
-        if locate == 'abstr5':
-            for key in ['paraGrade','paraAlign','paraSpace','paraFrontSpace','paraAfterSpace','paraIsIntent']:
-                if key == 'paraIsIntent':#对于缩进，特别处理
-                    if to_check['leftChars'] != '未获取属性值' and to_check['leftChars'] != '0':
-                        rp1.write(str(paraNum) + '_' + locate + '_' + 'error_paraleftChars_0\n')
-                        rp.write('    '+ to_check['leftChars'] + "段落有左侧缩进\n")
-                        if paragr.getparent().tag != "%s%s" % (word_schema, "sdtContent"):
-                            comment_txt.write("段落缩进有左侧缩进\n")
-                        errorInfo.append('\'type\':\'' + errorTypeName[key] + '\',\'correct\':\'0\'')
-                    elif to_check['left'] != '未获取属性值' and to_check['left'] != '0':
-                        rp1.write(str(paraNum) + '_' + locate + '_' + 'error_paraleft_0\n')
-                        rp.write('    '+ to_check['left'] + "段落有左侧缩进\n")
-                        if paragr.getparent().tag != "%s%s" % (word_schema, "sdtContent"):
-                            comment_txt.write("段落缩进有左侧缩进\n")
-                        errorInfo.append('\'type\':\'' + errorTypeName[key] + '\',\'correct\':\'0\'')
-                    if to_check['paraIsIntent1'] != '未获取属性值' and to_check['paraIsIntent1'] != '0':
-                        if to_check['paraIsIntent1'] != '200' and rule['paraIsIntent'] == '1':
-                            rp1.write(str(paraNum)+'_'+locate+'_'+'error_paraIsIntent1_200\n')
-                            rp.write('    '+ to_check['paraIsIntent1']+"段落首行缩进有误\n")
-                            if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
-                                comment_txt.write("段落首行缩进有误\n")
-                            errorInfo.append('\'type\':\'' + errorTypeName[key] + '\',\'correct\':\'200\'')
-                        elif rule['paraIsIntent'] == '0':
-                            rp1.write(str(paraNum)+'_'+locate+'_'+'error_paraIsIntent1_0\n')
-                            rp.write('    '+ to_check['paraIsIntent1']+"段落缩进有误\n")
-                            if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
-                                comment_txt.write("段落首行缩进有误\n")
-                            errorInfo.append('\'type\':\'' + errorTypeName[key] + '\',\'correct\':\'0\'')
-                    else:
-                        if int(to_check['paraIsIntent']) > 0 and rule['paraIsIntent'] is '0':
-                            rp1.write(str(paraNum)+'_'+locate+'_'+'error_paraIsIntent_'+str(20*int(to_check['fontSize'])*int(rule[key]))+'\n')
-                            rp.write('    '+ to_check['paraIsIntent']+"段落缩进首行有误\n")
-                            if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
-                                comment_txt.write("段落首行缩进有误\n")
-                            errorInfo.append('\'type\':\'' + errorTypeName[key] + '\',\'correct\':\'0\'')
-                        elif int(to_check['paraIsIntent']) < 100 and rule[key] == '1':#这里做一个粗略的设定，因为要是按照上面注释的一行来执行，错误率太高了
-                            rp1.write(str(paraNum)+'_'+locate+'_'+'error_paraIsIntent_'+str(20*int(to_check['fontSize'])*int(rule[key]))+'\n')
-                            rp.write('    '+ to_check['paraIsIntent']+"段落首行缩进有误\n")
-                            if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
-                                comment_txt.write("段落首行缩进有误\n")
-                            errorInfo.append('\'type\':\'' + errorTypeName[key] + '\',\'correct\':\'200\'')
-                    continue
-                else:
-                    if to_check[key] != rule[key]:
-                        rp.write('    '+errorTypeDescrip[key]+'是'+to_check[key]+'  正确应为：'+rule[key]+'\n')
+        for key in checkItemDct[locate]:
+            if key == 'paraIsIntent':#对于缩进，特别处理
+                if to_check['leftChars']!='未获取属性值' and to_check['leftChars']!='0':
+                    rp1.write(str(paraNum) + '_' + locate + '_' + 'error_paraleftChars_0\n')
+                    rp.write('    '+ to_check['leftChars'] + "段落有左侧缩进\n")
+                    if paragr.getparent().tag != "%s%s" % (word_schema, "sdtContent"):
+                        comment_txt.write("段落缩进有左侧缩进\n")
+                    errorInfo.append("段落左侧缩进有误")
+                elif to_check['left'] != '未获取属性值' and to_check['left'] != '0':
+                    rp1.write(str(paraNum) + '_' + locate + '_' + 'error_paraleft_0\n')
+                    rp.write('    '+ to_check['left'] + "段落有左侧缩进\n")
+                    if paragr.getparent().tag != "%s%s" % (word_schema, "sdtContent"):
+                        comment_txt.write("段落缩进有左侧缩进\n")
+                    errorInfo.append("段落左侧缩进有误")
+                if to_check['paraIsIntent1'] != '未获取属性值' and to_check['paraIsIntent1'] != '0':
+                    if to_check['paraIsIntent1'] != '200' and rule['paraIsIntent'] == '1':
+                        rp1.write(str(paraNum)+'_'+locate+'_'+'error_paraIsIntent1_200\n')
+                        rp.write('    '+ to_check['paraIsIntent1']+"段落首行缩进有误\n")
                         if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
-                            comment_txt.write(errorTypeDescrip[key]+'是'+ to_check[key] + '  正确应为：'+rule[key]+'\n')
-                        errorInfo.append('\'type\':\''+errorTypeName[key]+'\',\'correct\':\''+rule[key]+'\'')
-                        rp1.write(str(paraNum)+'_'+locate+'_error_'+ key+'_'+ rule[key]+'\n')
-            if ':' not in ptext and '：' not in ptext:
-                rp.write('    '+ 'warning: 关键词后面没有冒号！\n')
-                comment_txt.write('warning: 关键词后面没有冒号\n')
-                errorInfo.append('\'type\':\'' + "关键词后面没有冒号" + '\',\'correct\':\''+ '\'')
-            pat = re.compile("关|键|词|：|:| | ")
-            nextT = False
-            fCN = True
-            fEN = True
-            fShape = True
-            fSize = True
-            ftheme = True
-            for r in _iter(paragr,"r"):
-                if locate == "abstr5":
-                    rtext = ''
-                    for t in _iter(r, 't'):
+                            comment_txt.write("段落首行缩进有误\n")
+                        errorInfo.append("段落首行缩进有误")
+                    elif rule['paraIsIntent'] == '0':
+                        rp1.write(str(paraNum)+'_'+locate+'_'+'error_paraIsIntent1_0\n')
+                        rp.write('    '+ to_check['paraIsIntent1']+"段落首行缩进有误\n")
+                        if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
+                            comment_txt.write("段落首行缩进有误\n")
+                        errorInfo.append("段落首行缩进有误")
+                else:
+                    #if to_check['paraIsIntent'] != str(int(rule['paraIsIntent'])*int(rule[key])*20):
+                    if int(to_check['paraIsIntent']) > 0 and rule['paraIsIntent'] is '0':
+                        rp1.write(str(paraNum)+'_'+locate+'_'+'error_paraIsIntent_'+str(20*int(to_check['fontSize'])*int(rule[key]))+'\n')
+                        rp.write('    '+ to_check['paraIsIntent']+"段落首行缩进有误\n")
+                        if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
+                            comment_txt.write("段落首行缩进有误\n")
+                        errorInfo.append("段落首行缩进有误")
+                    elif int(to_check['paraIsIntent']) < 100 and rule[key] == '1':#这里做一个粗略的设定，因为要是按照上面注释的一行来执行，错误率太高了
+                        rp1.write(str(paraNum)+'_'+locate+'_'+'error_paraIsIntent_'+str(20*int(to_check['fontSize'])*int(rule[key]))+'\n')
+                        rp.write('    '+ to_check['paraIsIntent']+"段落首行缩进有误\n")
+                        if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
+                            comment_txt.write("段落首行缩进有误\n")
+                        errorInfo.append("段落首行缩进有误")
+                # just to experiment
+                if islist(paragr):
+                    rp1.write(str(paraNum) + '_' + locate + '_' + 'error_paraleft_0\n')
+                    rp1.write(str(paraNum) + '_' + locate + '_' + 'error_parahanging_0\n')
+                    pass
+                else:
+                    pass
+                continue
+            elif key == "fontSize" or key == "fontShape":
+                font_size = []
+                font_shape = []
+                for r in _iter(paragr,"r"):
+                    rtext = ""
+                    for t in _iter(r,"t"):
                         rtext += t.text
-                    if (pat.sub("", rtext) != "" and not (('KEY'in rtext or 'key' in rtext or "Key" in rtext or 'WORD'in rtext or'word' in rtext)\
-                 or 'keyword'in rtext or 'Keyword'in rtext or'KEYWORD'in rtext)) or nextT :
-                        locate = 'abstr6'
-                        rule = rules_dct[locate]
-                    if ":" in rtext or "：" in rtext:
-                        nextT = True
-                if ftheme and containThemeFonts(r):
-                    ftheme = False
-                    rp1.write(str(paraNum) + '_' + locate + '_' + 'error_fontTheme_0\n')
-                    rp.write("    当前段落部分为主题字体\n")
-                    comment_txt.write("当前段落部分为主题字体\n")
-                    errorInfo.append("当前段落部分为主题字体")
-                if fCN:
-                    eastAsia = ""
-                    flag = True
-                    for rfonts in _iter(r,"rFonts"):
-                        flag = False
-                        if has_key(rfonts,"eastAsia"):
-                            eastAsia = get_val(rfonts,"eastAsia")
-                        else:
-                            eastAsia = to_check["fontCN"]
-                    if flag:
-                        eastAsia = to_check["fontCN"]
-                    if eastAsia != rule["fontCN"]:
-                        fCN = False
-                        rp1.write(str(paraNum)+'_'+locate+'_'+'error_fontCN_0\n')
-                        rp.write("    当前段落部分中文字体有错\n")
-                        comment_txt.write("当前段落部分中文字体有误\n")
-                        errorInfo.append("当前段落部分中文字体有误")
-                if fEN:
-                    ascii = ""
-                    flag = True
-                    for rfonts in _iter(r,"rFonts"):
-                        flag = False
-                        if has_key(rfonts,"ascii"):
-                            ascii = get_val(rfonts,"ascii")
-                        else:
-                            ascii = to_check["fontEN"]
-                    if flag:
-                        ascii = to_check["fontEN"]
-                    if ascii != rule["fontEN"]:
-                        fEN = False
-                        rp1.write(str(paraNum)+'_'+locate+'_'+'error_fontEN_0\n')
-                        rp.write("    当前段落部分英文字体有错\n")
-                        comment_txt.write("当前段落部分英文字体有误\n")
-                        errorInfo.append("当前段落部分英文字体有误")
-                if fShape:
-                    rfshape = ""
-                    flag = True
-                    for rb in _iter(r,"b"):
-                        flag = False
-                        if has_key(rb,"val") and get_val(rb,"val") == '0':
-                            rfshape = get_val(rb,"val")
-                        else:
-                            rfshape = "1"
-                    if flag:
-                        rfshape = to_check["fontShape"]
-                    if rfshape != rule["fontShape"]:
-                        fShape = False
-                        rp1.write(str(paraNum) + '_' + locate + '_' + 'error_fontShape_0\n')
-                        rp.write("    当前段落部分字体加粗有误\n")
-                        comment_txt.write("当前段落部分字体加粗有误\n")
-                        errorInfo.append("当前段落部分字体加粗有误")
-                if fSize:
-                    rfsize = ""
-                    flag = True
-                    for rsize in _iter(r,"sz"):
-                        flag = False
-                        rfsize = get_val(rsize,"val")
-                    if flag:
-                        rfsize = to_check["fontSize"]
-                    if rfsize != rule["fontSize"]:
-                        fSize = False
-                        rp1.write(str(paraNum) + '_' + locate + '_' + 'error_fontSize_0\n')
-                        rp.write("    当前段落部分英文字体大小有误\n")
-                        comment_txt.write("当前段落部分英文字体大小有误\n")
-                        errorInfo.append("当前段落部分英文字体大小有误")
-        else:
-            for key in checkItemDct[locate]:
-                if key == 'paraIsIntent':#对于缩进，特别处理
-                    if to_check['leftChars']!='未获取属性值' and to_check['leftChars']!='0':
-                        rp1.write(str(paraNum) + '_' + locate + '_' + 'error_paraleftChars_0\n')
-                        rp.write('    '+ to_check['leftChars'] + "段落有左侧缩进\n")
-                        if paragr.getparent().tag != "%s%s" % (word_schema, "sdtContent"):
-                            comment_txt.write("段落缩进有左侧缩进\n")
-                        errorInfo.append("段落左侧缩进有误")
-                    elif to_check['left'] != '未获取属性值' and to_check['left'] != '0':
-                        rp1.write(str(paraNum) + '_' + locate + '_' + 'error_paraleft_0\n')
-                        rp.write('    '+ to_check['left'] + "段落有左侧缩进\n")
-                        if paragr.getparent().tag != "%s%s" % (word_schema, "sdtContent"):
-                            comment_txt.write("段落缩进有左侧缩进\n")
-                        errorInfo.append("段落左侧缩进有误")
-                    if to_check['paraIsIntent1'] != '未获取属性值' and to_check['paraIsIntent1'] != '0':
-                        if to_check['paraIsIntent1'] != '200' and rule['paraIsIntent'] == '1':
-                            rp1.write(str(paraNum)+'_'+locate+'_'+'error_paraIsIntent1_200\n')
-                            rp.write('    '+ to_check['paraIsIntent1']+"段落首行缩进有误\n")
-                            if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
-                                comment_txt.write("段落首行缩进有误\n")
-                            errorInfo.append("段落首行缩进有误")
-                        elif rule['paraIsIntent'] == '0':
-                            rp1.write(str(paraNum)+'_'+locate+'_'+'error_paraIsIntent1_0\n')
-                            rp.write('    '+ to_check['paraIsIntent1']+"段落首行缩进有误\n")
-                            if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
-                                comment_txt.write("段落首行缩进有误\n")
-                            errorInfo.append("段落首行缩进有误")
-                    else:
-                        #if to_check['paraIsIntent'] != str(int(rule['paraIsIntent'])*int(rule[key])*20):
-                        if int(to_check['paraIsIntent']) > 0 and rule['paraIsIntent'] is '0':
-                            rp1.write(str(paraNum)+'_'+locate+'_'+'error_paraIsIntent_'+str(20*int(to_check['fontSize'])*int(rule[key]))+'\n')
-                            rp.write('    '+ to_check['paraIsIntent']+"段落首行缩进有误\n")
-                            if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
-                                comment_txt.write("段落首行缩进有误\n")
-                            errorInfo.append("段落首行缩进有误")
-                        elif int(to_check['paraIsIntent']) < 100 and rule[key] == '1':#这里做一个粗略的设定，因为要是按照上面注释的一行来执行，错误率太高了
-                            rp1.write(str(paraNum)+'_'+locate+'_'+'error_paraIsIntent_'+str(20*int(to_check['fontSize'])*int(rule[key]))+'\n')
-                            rp.write('    '+ to_check['paraIsIntent']+"段落首行缩进有误\n")
-                            if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
-                                comment_txt.write("段落首行缩进有误\n")
-                            errorInfo.append("段落首行缩进有误")
-                    #just to experiment
-                    if islist(paragr):
-                        rp1.write(str(paraNum) + '_' + locate + '_' + 'error_paraleft_0\n')
-                        rp1.write(str(paraNum) + '_' + locate + '_' + 'error_parahanging_0\n')
-                        pass
-                    else:
-                        pass
-                    continue
-                elif key == "fontSize" or key == "fontShape":
-                    font_size = []
-                    font_shape = []
-                    for r in _iter(paragr,"r"):
-                        rtext = ""
-                        for t in _iter(r,"t"):
-                            rtext += t.text
-                        if rtext == "":
-                            continue
-                        elif key == "fontSize":
-                            flag = 1
-                            for sz in _iter(r,"sz"):
-                                flag = 0
-                                if get_val(sz,"val") not in font_size:
-                                    font_size.append(get_val(sz,"val"))
-                                break
-                            if flag == 1:
-                                if to_check[key] not in font_size:
-                                    font_size.append(to_check[key])
-                        elif key == "fontShape":
-                            flag = 1
-                            for b in _iter(r,"b"):
-                                flag = 0
-                                if has_key(b,'val'):
-                                    if get_val(b, 'val') != '0' and get_val(b, 'val') != 'false' and '1' not in font_shape:
-                                        font_shape.append('1')#表示bold
-                                    elif '0' not in font_shape:
-                                        font_shape.append('0')
-                                elif '1' not in font_shape:
-                                    font_shape.append('1')
-                                break
-                            if flag == 1:
-                                if to_check[key] not in font_shape:
-                                    font_shape.append(to_check[key])
-                    if key == "fontSize":
-                        if len(font_size) > 1 or font_size[0] != rule[key]:
-                            rp.write('    '+errorTypeDescrip[key]+'是'+ str(font_size) + '  正确应为：'+rule[key]+'\n')
-                            if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
-                                comment_txt.write(errorTypeDescrip[key]+'是'+ str(font_size) + '  正确应为：'+rule[key]+'\n')
-                            errorInfo.append('\'type\':\''+errorTypeName[key]+'\',\'correct\':\''+rule[key]+'\'')
-                            rp1.write(str(paraNum)+'_'+locate+'_error_'+ key+'_'+ rule[key]+'\n')
+                    if rtext == "":
+                        continue
+                    elif key == "fontSize":
+                        flag = 1
+                        for sz in _iter(r,"sz"):
+                            flag = 0
+                            if get_val(sz,"val") not in font_size:
+                                font_size.append(get_val(sz,"val"))
+                            break
+                        if flag == 1:
+                            if to_check[key] not in font_size:
+                                font_size.append(to_check[key])
                     elif key == "fontShape":
-                        if len(font_shape) > 1 or font_shape[0] != rule[key]:
-                            rp.write('    '+errorTypeDescrip[key]+'是'+ str(font_shape) + '  正确应为：'+rule[key]+'\n')
-                            if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
-                                comment_txt.write(errorTypeDescrip[key]+'是'+ str(font_shape) + '  正确应为：'+rule[key]+'\n')
-                            errorInfo.append('\'type\':\''+errorTypeName[key]+'\',\'correct\':\''+rule[key]+'\'')
-                            rp1.write(str(paraNum)+'_'+locate+'_error_'+ key+'_'+ rule[key]+'\n')
-                elif key == "fontCN" or key == "fontEN":
-                    font_EN = []
-                    font_CN = []
-                    ftheme = True
-                    for r in _iter(paragr,"r"):
-                        if ftheme and containThemeFonts(r):
-                            ftheme = False
-                            rp1.write(str(paraNum) + '_' + locate + '_' + 'error_fontTheme_0\n')
-                            rp.write("    当前段落部分为主题字体\n")
-                            comment_txt.write("当前段落部分为主题字体\n")
-                            errorInfo.append("当前段落部分为主题字体")
-                        rtext = ""
-                        for t in _iter(r,"t"):
-                            rtext += t.text
-                        if rtext == "":
-                            continue
-                        elif key == "fontCN":
-                            flag = 1
-                            for rfonts in _iter(r,"rFonts"):
-                                if has_key(rfonts,'eastAsia'):
-                                    flag = 0
-                                    if get_val(rfonts, 'eastAsia') not in font_CN:
-                                        font_CN.append(get_val(rfonts,"eastAsia"))
-                                break
-                            if flag == 1:
-                                if to_check[key] not in font_CN:
-                                    font_CN.append(to_check[key])
-                        elif key == "fontEN":
-                            flag = 1
-                            for rfonts in _iter(r,"rFonts"):
-                                if has_key(rfonts,"ascii"):
-                                    flag = 0
-                                    if get_val(rfonts,"ascii") not in font_EN:
-                                        font_EN.append(get_val(rfonts,"ascii"))
-                                break
-                            if flag == 1:
-                                if to_check[key] not in font_EN:
-                                    font_EN.append(to_check[key])
-                    if key == "fontCN":
-                        if len(font_CN) > 1 or font_CN[0] != rule[key]:
-                            rp.write('    '+errorTypeDescrip[key]+'是')
-                            if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
-                                comment_txt.write(errorTypeDescrip[key]+'是')
-                            for font in font_CN:
-                                rp.write(font+" ")
-                                if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
-                                    comment_txt.write(font+" ")
-                            rp.write('正确应为：'+rule[key]+'\n')
-                            if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
-                                comment_txt.write('正确应为：'+rule[key]+'\n')
-                            errorInfo.append('\'type\':\''+errorTypeName[key]+'\',\'correct\':\''+rule[key]+'\'')
-                            rp1.write(str(paraNum)+'_'+locate+'_error_'+ key+'_'+ rule[key]+'\n')
-                    elif key == "fontEN":
-                        if len(font_EN) > 1 or font_EN[0] != rule[key]:
-                            rp.write('    '+errorTypeDescrip[key]+'是')
-                            if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
-                                comment_txt.write(errorTypeDescrip[key]+'是')
-                            for font in font_EN:
-                                rp.write(font+" ")
-                                if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
-                                    comment_txt.write(font+" ")
-                            rp.write('正确应为：'+rule[key]+'\n')
-                            if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
-                                comment_txt.write('正确应为：'+rule[key]+'\n')
-                            errorInfo.append('\'type\':\''+errorTypeName[key]+'\',\'correct\':\''+rule[key]+'\'')
-                            rp1.write(str(paraNum)+'_'+locate+'_error_'+ key+'_'+ rule[key]+'\n')
-                else:
-                    if to_check[key] != rule[key]:
-                        rp.write('    '+errorTypeDescrip[key]+'是'+to_check[key]+'  正确应为：'+rule[key]+'\n')
+                        flag = 1
+                        for b in _iter(r,"b"):
+                            flag = 0
+                            if has_key(b,'val'):
+                                if get_val(b, 'val') != '0' and get_val(b, 'val') != 'false' and '1' not in font_shape:
+                                    font_shape.append('1')#表示bold
+                                elif '0' not in font_shape:
+                                    font_shape.append('0')
+                            elif '1' not in font_shape:
+                                font_shape.append('1')
+                            break
+                        if flag == 1:
+                            if to_check[key] not in font_shape:
+                                font_shape.append(to_check[key])
+                if key == "fontSize":
+                    if len(font_size) > 1 or font_size[0] != rule[key]:
+                        rp.write('    '+errorTypeDescrip[key]+'是'+ str(font_size) + '  正确应为：'+rule[key]+'\n')
                         if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
-                            comment_txt.write(errorTypeDescrip[key]+'是'+ to_check[key] + '  正确应为：'+rule[key]+'\n')
+                            comment_txt.write(errorTypeDescrip[key]+'是'+ str(font_size) + '  正确应为：'+rule[key]+'\n')
                         errorInfo.append('\'type\':\''+errorTypeName[key]+'\',\'correct\':\''+rule[key]+'\'')
                         rp1.write(str(paraNum)+'_'+locate+'_error_'+ key+'_'+ rule[key]+'\n')
+                elif key == "fontShape":
+                    if len(font_shape) > 1 or font_shape[0] != rule[key]:
+                        rp.write('    '+errorTypeDescrip[key]+'是'+ str(font_shape) + '  正确应为：'+rule[key]+'\n')
+                        if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
+                            comment_txt.write(errorTypeDescrip[key]+'是'+ str(font_shape) + '  正确应为：'+rule[key]+',1表示加粗，0表示不加粗\n')
+                        errorInfo.append('\'type\':\''+errorTypeName[key]+'\',\'correct\':\''+rule[key]+'\'')
+                        rp1.write(str(paraNum)+'_'+locate+'_error_'+ key+'_'+ rule[key]+'\n')
+            elif key == "fontCN" or key == "fontEN":
+                font_EN = []
+                font_CN = []
+                ftheme = True
+                for r in _iter(paragr,"r"):
+                    if ftheme and containThemeFonts(r):
+                        ftheme = False
+                        rp1.write(str(paraNum) + '_' + locate + '_' + 'error_fontTheme_0\n')
+                        rp.write("    当前段落部分为主题字体\n")
+                        comment_txt.write("当前段落部分为主题字体\n")
+                        errorInfo.append("当前段落部分为主题字体")
+                    rtext = ""
+                    for t in _iter(r,"t"):
+                        rtext += t.text
+                    if rtext == "":
+                        continue
+                    elif key == "fontCN":
+                        flag = 1
+                        for rfonts in _iter(r,"rFonts"):
+                            if has_key(rfonts,'eastAsia'):
+                                flag = 0
+                                if get_val(rfonts, 'eastAsia') not in font_CN:
+                                    font_CN.append(get_val(rfonts,"eastAsia"))
+                            break
+                        if flag == 1:
+                            if to_check[key] not in font_CN:
+                                font_CN.append(to_check[key])
+                    elif key == "fontEN":
+                        flag = 1
+                        for rfonts in _iter(r,"rFonts"):
+                            if has_key(rfonts,"ascii"):
+                                flag = 0
+                                if get_val(rfonts,"ascii") not in font_EN:
+                                    font_EN.append(get_val(rfonts,"ascii"))
+                            break
+                        if flag == 1:
+                            if to_check[key] not in font_EN:
+                                font_EN.append(to_check[key])
+                if key == "fontCN":
+                    if len(font_CN) > 1 or font_CN[0] != rule[key]:
+                        rp.write('    '+errorTypeDescrip[key]+'是')
+                        if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
+                            comment_txt.write(errorTypeDescrip[key]+'是')
+                        for font in font_CN:
+                            rp.write(font+" ")
+                            if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
+                                comment_txt.write(font+" ")
+                        rp.write('正确应为：'+rule[key]+'\n')
+                        if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
+                            comment_txt.write('正确应为：'+rule[key]+'\n')
+                        errorInfo.append('\'type\':\''+errorTypeName[key]+'\',\'correct\':\''+rule[key]+'\'')
+                        rp1.write(str(paraNum)+'_'+locate+'_error_'+ key+'_'+ rule[key]+'\n')
+                elif key == "fontEN":
+                    if len(font_EN) > 1 or font_EN[0] != rule[key]:
+                        rp.write('    '+errorTypeDescrip[key]+'是')
+                        if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
+                            comment_txt.write(errorTypeDescrip[key]+'是')
+                        for font in font_EN:
+                            rp.write(font+" ")
+                            if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
+                                comment_txt.write(font+" ")
+                        rp.write('正确应为：'+rule[key]+'\n')
+                        if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
+                            comment_txt.write('正确应为：'+rule[key]+'\n')
+                        errorInfo.append('\'type\':\''+errorTypeName[key]+'\',\'correct\':\''+rule[key]+'\'')
+                        rp1.write(str(paraNum)+'_'+locate+'_error_'+ key+'_'+ rule[key]+'\n')
+            else:
+                if to_check[key] != rule[key]:
+                    rp.write('    '+errorTypeDescrip[key]+'是'+to_check[key]+'  正确应为：'+rule[key]+'\n')
+                    if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
+                        comment_txt.write(errorTypeDescrip[key]+'是'+ to_check[key] + '  正确应为：'+rule[key]+'\n')
+                    errorInfo.append('\'type\':\''+errorTypeName[key]+'\',\'correct\':\''+rule[key]+'\'')
+                    rp1.write(str(paraNum)+'_'+locate+'_error_'+ key+'_'+ rule[key]+'\n')
     return errorInfo
 
 def containchildnode(parent,child):
@@ -942,10 +729,10 @@ def contain_ref(para,paraNum):
                                 else:
                                     rp1.write(str(paraNum) + '_' + str(refnum) + '_error_ref_['+str(i)+']'+'\n')
                                     rp.write("参考文献的交叉引用与目标不符,未更新\n")
-                            #        comment_txt.write("参考文献的交叉引用与参考文献列表中对应的列表项不符，可能未更新\n")
+                            #       comment_txt.write("参考文献的交叉引用与参考文献列表中对应的列表项不符，可能未更新\n")
                         if existflag == 0:
                             rp.write("参考文献的交叉引用未在参考文献列表中找到对应的列表项，可能未更新\n")
-                           # comment_txt.write("参考文献的交叉引用未在参考文献列表中找到对应的列表项，可能未更新\n")
+                           #comment_txt.write("参考文献的交叉引用未在参考文献列表中找到对应的列表项，可能未更新\n")
                     ref_text = ''
                     flag = 0
                     ref_value['ref'] == None
@@ -964,7 +751,6 @@ def contain_ref(para,paraNum):
                     vertAlignValue = get_val(vertAlign,'val')
                 if vertAlignValue != 'superscript':
                     rp.write("参考文献的交叉引用未使用上标\n")
-                    #comment_txt.write("参考文献的交叉引用未使用上标\n")
                     rp1.write(str(paraNum) + '_' + str(refnum) + '_error_refVertAlign_superscript\n')
 
 def getabstractnumId(numid):
@@ -993,89 +779,115 @@ def getformat(abstractnumid,ilvl):
                             lvlText = get_val(node,'val')
                     return start,numFmt,lvlText
 
-def graphOrExcelTitle(ObjectFlag,ptext,paraNum,paragr):
+def graphTitle(ObjectFlag,ptext,paraNum,paragr):
     #hsy
     graphTitlePattern = re.compile('图(\s)*[0-9]+(\\.|-)[0-9]')#图标题的正则表达式
     wrongGraphTitlePattern = re.compile('图(\s)*[0-9]')#错误图标题的正则表达式
-    excelTitlePattern = re.compile('表(\s)*[0-9]+(\\.|-)[0-9]')#表标题的正则表达式
-    wrongExcelTitlePattern = re.compile('表(\s)*[0-9]')#错误表标题的正则表达式
     #
     if ObjectFlag == 1:
-        if not graphTitlePattern.match(ptext):
+        if not graphTitlePattern.match(ptext) and not wrongGraphTitlePattern.match(ptext):
             rp.write('     warning: 找不到对应图注 ----->'+ptext+'\n')
-    if graphTitlePattern.match(ptext):
-        if paraNum - 1 in locate.keys():
-            if locate[paraNum - 1] != 'object':
+            if paragr.getparent().tag != "%s%s" % (word_schema, "sdtContent"):
+                comment_txt.write("warning:找不到对应图注,请在图后添加，格式如图2.2或图2-2\n")
+        elif wrongGraphTitlePattern.match(ptext) and not graphTitlePattern.match(ptext):
+            rp.write('    warning: 请改为符合规则的图注 ------>' + ptext + '\n')
+            comment_txt.write("warning:图注不规则，正确如图2.2或图2-2\n")
+            found = False
+            for node in paragr.iter(tag=etree.Element):
+                if _check_element_is(node, 'r'):
+                    for bookmarks in node.iter(tag=etree.Element):
+                        if _check_element_is(bookmarks, 'bookmarkStart'):
+                            if bookmarks.values()[1][:4] == '_Ref':
+                                found = True
+            if not found:
+                rp.write('    此图注没被引用过' + ptext + '\n')
+                comment_txt.write("warning:此图注没被引用过\n")
+    else:
+        if graphTitlePattern.match(ptext):
+            if paraNum - 1 in locate.keys():
+                if locate[paraNum - 1] != 'object':
+                    rp.write('    warning: 没有对应的图。--->' + ptext + '\n')
+                    comment_txt.write("warning:图注无对应的图,请在图后添加，格式如图2.2或图2-2\n")
+            else:
                 rp.write('    warning: 没有对应的图。--->' + ptext + '\n')
-             #   print('    warning: 没有对应的图。--->' + ptext)
-        else:
-            rp.write('    warning: 没有对应的图。--->' + ptext + '\n')
-            #print('    warning: 没有对应的图。--->' + ptext)
-        found = False
-        for node in paragr.iter(tag=etree.Element):
-            if _check_element_is(node, 'r'):
-                for bookmarks in node.iter(tag=etree.Element):
-                    if _check_element_is(bookmarks, 'bookmarkStart'):
-                        if bookmarks.values()[1][:4] == '_Ref':
-                            found = True
-        if not found:
-            rp.write('    此图注没被引用过' + ptext + '\n')
-            #print('    此图注没被引用过' + ptext + '\n')
-    if wrongGraphTitlePattern.match(ptext) and not graphTitlePattern.match(ptext):
-        rp.write('    warning: 请改为符合规则的图注 ------>' + ptext + '\n')
-        #print('    warning: 请改为符合规则的图注 ------>' + ptext)
-        found = False
-        for node in paragr.iter(tag=etree.Element):
-            if _check_element_is(node, 'r'):
-                for bookmarks in node.iter(tag=etree.Element):
-                    if _check_element_is(bookmarks, 'bookmarkStart'):
-                        if bookmarks.values()[1][:4] == '_Ref':
-                            found = True
-        if not found:
-            rp.write('    此图注没被引用过' + ptext + '\n')
-         #   print('    此图注没被引用过' + ptext )
-    if excelTitlePattern.match(ptext):
-        found = False
-        for node in paragr.iter(tag = etree.Element):
-            if _check_element_is(node, 'r'):
-                for bookmarks in node.iter(tag = etree.Element):
-                    if _check_element_is(bookmarks, 'bookmarkStart'):
-                        if bookmarks.values()[1][:4] == '_Ref':
-                            found = True
-        if not found:
-            rp.write('    此图注没被引用过' + ptext + '\n')
-          #  print('    此图注没被引用过' + ptext)
-    if wrongExcelTitlePattern.match(ptext) and not excelTitlePattern.match(ptext):
-        rp.write('    warning: 请改为符合规则的图注------->'+ptext+'\n')
-        #print('    warning: 请改为符合规则的图注------->'+ptext+'\n')
-        found = False
-        for node in paragr.iter(tag=etree.Element):
-            if _check_element_is(node, 'r'):
-                for bookmarks in node.iter(tag=etree.Element):
-                    if _check_element_is(bookmarks, 'bookmarkStart'):
-                        if bookmarks.values()[1][:4] == '_Ref':
-                            found = True
-        if not found:
-            rp.write('    warning: 此图注没被引用过' + ptext + '\n' )
+                comment_txt.write("warning:图注无对应的图\n")
+            found = False
+            for node in paragr.iter(tag=etree.Element):
+                if _check_element_is(node, 'r'):
+                    for bookmarks in node.iter(tag=etree.Element):
+                        if _check_element_is(bookmarks, 'bookmarkStart'):
+                            if bookmarks.values()[1][:4] == '_Ref':
+                                found = True
+            if not found:
+                rp.write('    此图注没被引用过' + ptext + '\n')
+                comment_txt.write("warning:此图注没被引用过\n")
+        elif wrongGraphTitlePattern.match(ptext):
+            rp.write('    warning: 请改为符合规则的图注 ------>' + ptext + '\n')
+            comment_txt.write("warning:图注不规则，正确如图2.2或图2-2\n")
+            if paraNum - 1 in locate.keys():
+                if locate[paraNum - 1] != 'object':
+                    rp.write('    warning: 没有对应的图。--->' + ptext + '\n')
+                    comment_txt.write("warning:图注无对应的图\n")
+            else:
+                rp.write('    warning: 没有对应的图。--->' + ptext + '\n')
+                comment_txt.write("warning:图注无对应的图\n")
+            found = False
+            for node in paragr.iter(tag=etree.Element):
+                if _check_element_is(node, 'r'):
+                    for bookmarks in node.iter(tag=etree.Element):
+                        if _check_element_is(bookmarks, 'bookmarkStart'):
+                            if bookmarks.values()[1][:4] == '_Ref':
+                                found = True
+            if not found:
+                rp.write('    此图注没被引用过' + ptext + '\n')
+                comment_txt.write("warning:此图注没被引用过\n")
+
+#def excelTitle(ObjectFlag, ptext, paraNum, paragr):
+    #excelTitlePattern = re.compile('表(\s)*[0-9]+(\\.|-)[0-9]')#表标题的正则表达式
+    #wrongExcelTitlePattern = re.compile('表(\s)*[0-9]')#错误表标题的正则表达式
+    # if excelTitlePattern.match(ptext):
+    #     found = False
+    #     for node in paragr.iter(tag = etree.Element):
+    #         if _check_element_is(node, 'r'):
+    #             for bookmarks in node.iter(tag = etree.Element):
+    #                 if _check_element_is(bookmarks, 'bookmarkStart'):
+    #                     if bookmarks.values()[1][:4] == '_Ref':
+    #                         found = True
+    #     if not found:
+    #         rp.write('    此图注没被引用过' + ptext + '\n')
+    #       #  print('    此图注没被引用过' + ptext)
+    # if wrongExcelTitlePattern.match(ptext) and not excelTitlePattern.match(ptext):
+    #     rp.write('    warning: 请改为符合规则的图注------->'+ptext+'\n')
+    #     #print('    warning: 请改为符合规则的图注------->'+ptext+'\n')
+    #     found = False
+    #     for node in paragr.iter(tag=etree.Element):
+    #         if _check_element_is(node, 'r'):
+    #             for bookmarks in node.iter(tag=etree.Element):
+    #                 if _check_element_is(bookmarks, 'bookmarkStart'):
+    #                     if bookmarks.values()[1][:4] == '_Ref':
+    #                         found = True
+    #     if not found:
+    #         rp.write('    warning: 此图注没被引用过' + ptext + '\n' )
 
 if __name__ == '__main__':
     startTime=time.time()
     #Docx_Filename= input("please input the path of your docx:")
     # Docx_Filename = "test.docx"
-    #try:
-    zipF = zipfile.ZipFile(Docx_Filename)
-    xml_from_file = zipF.read('word/document.xml')
-    style_from_file = zipF.read('word/styles.xml')
-    xml_tree = etree.fromstring(xml_from_file)
-    style_tree = etree.fromstring(style_from_file)
-    #numbering_content = zipF.read("word/numbering.xml")
-    # numbering_tree = etree.fromstring(numbering_content)
-    #except:
-        #print("error in reading the docx document.")
-        #exit(0)
-    rules_dct = read_rules(Rule_Filename)
-    part = {}
-    locate = {}
+    try:
+        zipF = zipfile.ZipFile(Docx_Filename)
+        xml_from_file = zipF.read('word/document.xml')
+        style_from_file = zipF.read('word/styles.xml')
+        xml_tree = etree.fromstring(xml_from_file)
+        style_tree = etree.fromstring(style_from_file)
+        try:
+            numbering_content = zipF.read("word/numbering.xml")
+            numbering_tree = etree.fromstring(numbering_content)
+        except:
+            pass
+    except:
+        print("error in reading the docx document.")
+        exit(0)
+    read_rules(Rule_Filename)
     #参考文献字典zwl
     ref_dic = {}
     #hsy
@@ -1085,19 +897,16 @@ if __name__ == '__main__':
     #
     first_locate()
     second_locate()
-    paraNum=0
-    empty_para=0
 
-    rp = open(Data_DirPath + 'check_out','w')
-    rp1 = open(Data_DirPath + 'check_out1','w')
-    rp2 = open(Data_DirPath + 'space','w')
-    comment_txt = open(Data_DirPath + "comment.txt","w")
+    rp = open(Data_DirPath + 'check_out','w',encoding="utf-8")
+    rp1 = open(Data_DirPath + 'check_out1','w',encoding="utf-8")
+    rp2 = open(Data_DirPath + 'space','w',encoding="utf-8")
+    comment_txt = open(Data_DirPath + "comment.txt","w",encoding="utf-8")
 
-    # rp = open('check_out','w')
-    # rp1 = open('check_out1','w')
-    # rp2 = open('space','w')
-    # comment_txt = open("comment","w")
-    #sys.exit()
+    # rp = open('check_out','w',encoding="utf-8")           # 错误信息
+    # rp1 = open('check_out1','w',encoding="utf-8")         # 格式的错误信息，提供给modify.py修改
+    # rp2 = open('space','w',encoding="utf-8")              # 图标标题空格的错误，理应与上一个文件合在一起
+    # comment_txt = open("comment","w",encoding="utf-8")    # 错误信息，提供给显示在原文档的批注上
     rp.write('''论文格式检查报告文档使用说明：
     *****此版本为初次上线测试版，难免存在误判等许多问题，遇到误判时请谅解，并可以将问题反馈给我们完善程序∧_∧*****
     各字段值说明：
@@ -1110,44 +919,59 @@ if __name__ == '__main__':
     **********并不华丽的分割线（然并卵）**********
     ''')
     location = ""
+    paraNum = 0
+    empty_para = 0
+    ptext = ""
     p_format={}.fromkeys(['fontCN','fontEN','fontSize','paraAlign','fontShape','paraSpace',
                              'paraIsIntent','paraFrontSpace','paraAfterSpace','paraGrade',"leftChars","left"])
     for paragr in _iter(xml_tree,'p'):
-        paraNum +=1
+        paraNum += 1
         if paragr.getparent().tag == '%s%s'% (word_schema,'txbxContent'):
             continue
         ptext = get_ptext(paragr)
         if paraNum in locate.keys():
             location = locate[paraNum]
+        if location in ["cover1",'cover2','cover3','cover4','cover5']:
+            if paragr.getparent().tag != "%s%s" % (word_schema, "sdtContent"):
+                comment_txt.write("Id:" + str(paraNum) + '\n')
+                comment_txt.write('correct\n')
+            continue
         rp.write(str(paraNum) + ' ' + ptext + ' ' + location + '\n')
         if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
             comment_txt.write("Id:"+str(paraNum)+'\n')
         if ptext == ' ' or ptext == '':
             empty_para += 1
             if empty_para>=2:
-                rp.write(' \n    warning:不允许出现连续空行 \n')
+                rp.write('    warning:不允许出现连续空行 \n')
                 if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
                     comment_txt.write("warning:不允许出现连续空行\n")
             else:
                 if paragr.getparent().tag != "%s%s"%(word_schema,"sdtContent"):
                     comment_txt.write("correct\n")
             continue
-        empty_para =0
+        empty_para = 0
         get_format(paragr,p_format)
         #下面这函数判断当前图表标注的引用，生成错误信息，还未写修改的方法
-        #graphOrExcelTitle(ObjectFlag,ptext,paraNum,paragr)
+        graphTitle(ObjectFlag,ptext,paraNum,paragr)
         if location == 'object':
             ObjectFlag = 1
             comment_txt.write("correct\n")
             continue
         else:
             ObjectFlag = 0
-        first_text = 0
+        #contain_ref(paragr,paraNum)
+        if location in rules_dct.keys():
+            rp.write('    位置：'+rules_dct[location]['name']+'\n')
+            errorInfo = check_out(rules_dct[location],p_format,location,paraNum,paragr)
+        else:
+            errorInfo=''
         for r in _iter(paragr,"r"):
             rtext = ""
             if containchildnode(r,"tab"):
-                rp.write("段首有tab键")
+                rp.write("    段首有tab键\n")
                 rp1.write(str(paraNum) + '_' + 'paraStart' + '_error_' + 'startWithTabs' + '_0\n')
+                comment_txt.write("段首有tab键\n")
+                errorInfo = "1"
                 break
             pat = re.compile(' |　+')
             for t in _iter(r, 't'):
@@ -1156,15 +980,11 @@ if __name__ == '__main__':
                 continue
             else:
                 break
-        if location != 'taskbook' and (ptext.startswith(" ") or ptext.startswith("　")):
+        if ptext.startswith(" ") or ptext.startswith("　"):
             rp.write("    段首有空格\n")
             rp1.write(str(paraNum)+'_'+'paraStart'+'_error_'+'startWithSpace'+'_0\n')
-        contain_ref(paragr,paraNum)
-        if location in rules_dct.keys():
-            rp.write('    位置：'+rules_dct[location]['name']+'\n')
-            errorInfo = check_out(rules_dct[location],p_format,location,paraNum,paragr)
-        else:
-            errorInfo=''
+            comment_txt.write("段首有空格\n")
+            errorInfo = "1"
         if errorInfo:
             pass
         else:
@@ -1179,25 +999,25 @@ if __name__ == '__main__':
     endTime=time.time()
     print('用时： %.2f ms' % (100*(endTime-startTime)))
 
-    hyperlinks = []
-    bookmarks = []
-    #检查目录是否自动更新
-    for node in _iter(xml_tree, 'hyperlink'):
-        temp=''
-        for hl in _iter(node,'t'):
-            temp += hl.text
-        hyperlinks.append(node.values()[0])
-    for node in _iter(xml_tree, 'bookmarkStart'):
-        bookmarks.append(node.values()[1])
-
-    catalog_ud= True
-    for i in hyperlinks:
-        if i not in bookmarks:
-            catalog_ud =False
-    if catalog_ud:
-        pass
-    else:
-        pass
+    # hyperlinks = []
+    # bookmarks = []
+    # #检查目录是否自动更新
+    # for node in _iter(xml_tree, 'hyperlink'):
+    #     temp=''
+    #     for hl in _iter(node,'t'):
+    #         temp += hl.text
+    #     hyperlinks.append(node.values()[0])
+    # for node in _iter(xml_tree, 'bookmarkStart'):
+    #     bookmarks.append(node.values()[1])
+    #
+    # catalog_ud= True
+    # for i in hyperlinks:
+    #     if i not in bookmarks:
+    #         catalog_ud =False
+    # if catalog_ud:
+    #     pass
+    # else:
+    #     pass
     rp.write('\n\n\n论文格式检查完毕！\n')
     rp.close()
     rp1.close()

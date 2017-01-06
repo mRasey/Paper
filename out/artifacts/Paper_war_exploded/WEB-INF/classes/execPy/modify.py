@@ -8,18 +8,18 @@ import shutil
 import time
 import os
 import tempfile
-# import charset
+# import chardet
+
+#Docx_Filename = input("please input the path of your docx:")
+# Docx_Filename = "test.docx"
+# Checkout_Filename='check_out1'
+# ModifySpace_FileName = 'space'
 
 Data_DirPath = sys.argv[1]#输入文件夹的路径,命令行的第二个参数
 
 Docx_Filename = Data_DirPath + 'origin.docx'
 Checkout_Filename = Data_DirPath + 'check_out1'
 ModifySpace_FileName = Data_DirPath + 'space'
-
-#Docx_Filename = input("please input the path of your docx:")
-# Docx_Filename = "test.docx"
-# Checkout_Filename='check_out1'
-# ModifySpace_FileName = 'space'
 
 word_schema='{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
 Unicode_bt = 'utf-8'
@@ -81,7 +81,7 @@ def modify_rpr(r,rnode,label,rightValue):
                 rPr.insert(0, etree.Element('%s%s' % (word_schema, rnode)))
                 node = rPr[0]
                 node.set('%s%s' % (word_schema, label),rightValue)
-    if found_rPr == False:
+    if not found_rPr:
         r.insert(0, etree.Element('%s%s' % (word_schema, 'rPr')))
         rPr = r[0]
         rPr.insert(0, etree.Element('%s%s' % (word_schema, rnode)))
@@ -113,39 +113,7 @@ def modify(xml_tree,errorlist):
                                 t.text=txt[:pos]+' '+txt[pos:]
                                 t.set('%s%s' % ('{http://www.w3.org/XML/1998/namespace}','space'), 'preserve')
         while listCount<len(errorlist) and paraNum == int(errorlist[listCount]['paraNum']):
-            if errorlist[listCount]["location"] in ['abstr5','abstr6'] and errorlist[listCount]["type"] in ["fontCN",'fontEN','fontSize','fontShape']:
-                pat = re.compile("关|键|词|：|:| | ")
-                locate = 'abstr5'
-                nextT = False
-                for r in _iter(paragr, "r"):
-                    if locate == "abstr5":
-                        rtext = ''
-                        for t in _iter(r,'t'):
-                            rtext += t.text
-                        if (pat.sub("", rtext) != "" and not (('KEY'in rtext or 'key' in rtext or "Key" in rtext or 'WORD'in rtext or'word' in rtext)\
-                 or 'keyword'in rtext or 'Keyword'in rtext or'KEYWORD'in rtext)) or nextT:
-                            locate = 'abstr6'
-                        if ":" in rtext or "：" in rtext:
-                            nextT = True
-                    if errorlist[listCount]['type'] == 'fontCN':
-                        if locate == 'abstr5':
-                            modify_rpr(r,'rFonts','eastAsia','黑体')
-                        elif locate == 'abstr6':
-                            modify_rpr(r,'rFonts','eastAsia','宋体')
-                    elif errorlist[listCount]['type'] == 'fontEN':
-                        modify_rpr(r,'rFonts','ascii','Times New Roman')
-                    elif errorlist[listCount]['type'] == 'fontSize':
-                        if locate == 'abstr5':
-                            modify_rpr(r,'sz','val','28')
-                        elif locate == 'abstr6':
-                            modify_rpr(r,'sz','val','24')
-                    elif errorlist[listCount]['type'] == 'fontShape':
-                        if locate == 'abstr5':
-                            modify_rpr(r,'b','val','1')
-                        elif locate == 'abstr6':
-                            modify_rpr(r,'b','val','0')
-                listCount += 1
-            elif errorlist[listCount]['type'] == 'startWithTabs':
+            if errorlist[listCount]['type'] == 'startWithTabs':
                 for r in _iter(paragr, 'r'):
                     rtext = ""
                     for tab in _iter(r,"tab"):
@@ -185,13 +153,13 @@ def modify(xml_tree,errorlist):
                                 found_jc = True
                                 jc.set('%s%s' %(word_schema,'val'),errorlist[listCount]['rightValue'])
                                 break
-                        if found_jc == False:
+                        if not found_jc:
                             pPr.insert(0,etree.Element('%s%s' %(word_schema,'jc')))
                             jc = pPr[0]
                             jc.set('%s%s' %(word_schema,'val'),errorlist[listCount]['rightValue'])
                         #print etree.tostrin(pPr,pretty_print = True)
                         break
-                listCount = listCount + 1
+                listCount +=  1
             elif errorlist[listCount]['type'] == 'paraIsIntent' or errorlist[listCount]['type'] == 'paraIsIntent1':
                 for pPr in paragr:
                     if _check_element_is(pPr,'pPr'):
@@ -206,7 +174,7 @@ def modify(xml_tree,errorlist):
                                     ind.set('%s%s' %(word_schema,'firstLineChars'),'0')
                                     ind.set('%s%s' %(word_schema,'firstLine'),'0')
                                 break
-                        if found_ind == False:
+                        if not found_ind:
                             pPr.insert(0,etree.Element('%s%s' %(word_schema,'ind')))
                             ind = pPr[0]
                             if errorlist[listCount]['rightValue'] != '0':
@@ -216,7 +184,7 @@ def modify(xml_tree,errorlist):
                                 ind.set('%s%s' %(word_schema,'firstLine'),'0')
                         #print etree.tostring(pPr,pretty_print = True)
                         break
-                listCount = listCount + 1
+                listCount += 1
             elif errorlist[listCount]['type'] == 'paraleft' or errorlist[listCount]['type'] == 'paraleftChars':
                 for pPr in paragr:
                     if _check_element_is(pPr, 'pPr'):
@@ -228,14 +196,14 @@ def modify(xml_tree,errorlist):
                                 ind.set('%s%s' % (word_schema, 'leftChars'), '0')
                                 ind.set('%s%s' % (word_schema, 'left'), '0')
                                 break
-                        if found_ind == False:
+                        if not found_ind:
                             pPr.insert(0, etree.Element('%s%s' % (word_schema, 'ind')))
                             ind = pPr[0]
                             ind.set('%s%s' % (word_schema, 'leftChars'), '0')
                             ind.set('%s%s' % (word_schema, 'left'), '0')
                         # print etree.tostring(pPr,pretty_print = True)
                         break
-                listCount = listCount + 1
+                listCount += 1
             elif errorlist[listCount]['type'] == 'parahanging' or errorlist[listCount]['type'] == 'parahangingChars':
                 for pPr in paragr:
                     if _check_element_is(pPr, 'pPr'):
@@ -247,14 +215,14 @@ def modify(xml_tree,errorlist):
                                 ind.set('%s%s' % (word_schema, 'hangingChars'), '0')
                                 ind.set('%s%s' % (word_schema, 'hanging'), '0')
                                 break
-                        if found_ind == False:
+                        if not found_ind:
                             pPr.insert(0, etree.Element('%s%s' % (word_schema, 'ind')))
                             ind = pPr[0]
                             ind.set('%s%s' % (word_schema, 'hangingChars'), '0')
                             ind.set('%s%s' % (word_schema, 'hanging'), '0')
                         # print etree.tostring(pPr,pretty_print = True)
                         break
-                listCount = listCount + 1
+                listCount +=  1
             elif errorlist[listCount]['type'] == 'paraSpace':
                 for pPr in paragr:
                     if _check_element_is(pPr,'pPr'):
@@ -265,13 +233,13 @@ def modify(xml_tree,errorlist):
                                 found_node = True
                                 node.set('%s%s' %(word_schema,'line'),errorlist[listCount]['rightValue'])
                                 break
-                        if found_node == False:
+                        if not found_node:
                             pPr.insert(0,etree.Element('%s%s' %(word_schema,'spacing')))
                             node = pPr[0]
                             node.set('%s%s' %(word_schema,'line'),errorlist[listCount]['rightValue'])
                         #print etree.tostring(pPr,pretty_print = True)
                         break
-                listCount = listCount + 1
+                listCount += 1
             elif errorlist[listCount]['type'] == 'paraFrontSpace':
                 for pPr in paragr:
                     if _check_element_is(pPr,'pPr'):
@@ -282,30 +250,28 @@ def modify(xml_tree,errorlist):
                                 found_node = True
                                 node.set('%s%s' %(word_schema,'before'),errorlist[listCount]['rightValue'])
                                 break
-                        if found_node == False:
+                        if not found_node:
                             pPr.insert(0,etree.Element('%s%s' %(word_schema,'spacing')))
                             node = pPr[0]
                             node.set('%s%s' %(word_schema,'before'),errorlist[listCount]['rightValue'])
                         #print etree.tostring(pPr,pretty_print = True)
                         break
-                listCount = listCount + 1
+                listCount +=  1
             elif errorlist[listCount]['type'] == 'paraAfterSpace':
                 for pPr in paragr:
                     if _check_element_is(pPr,'pPr'):
                         found_node = False
-                        #print etree.tostring(pPr,pretty_print = True)
                         for node in pPr:
                             if _check_element_is(node,'spacing'):
                                 found_node = True
                                 node.set('%s%s' %(word_schema,'after'),errorlist[listCount]['rightValue'])
                                 break
-                        if found_node == False:
+                        if not found_node:
                             pPr.insert(0,etree.Element('%s%s' %(word_schema,'spacing')))
                             node = pPr[0]
                             node.set('%s%s' %(word_schema,'after'),errorlist[listCount]['rightValue'])
-                        #print etree.tostring(pPr,pretty_print = True)
                         break
-                listCount = listCount + 1
+                listCount += 1
             elif errorlist[listCount]['type'] == 'fontCN':
                 for r in _iter(paragr,"r"):
                     found_rPr = False
@@ -322,13 +288,13 @@ def modify(xml_tree,errorlist):
                                 rPr.insert(0,etree.Element('%s%s' %(word_schema,'rFonts')))
                                 node = rPr[0]
                                 node.set('%s%s' %(word_schema,'eastAsia'),errorlist[listCount]['rightValue'])
-                    if found_rPr == False:
+                    if not found_rPr:
                         r.insert(0,etree.Element('%s%s' %(word_schema,'rPr')))
                         rPr = r[0]
                         rPr.insert(0,etree.Element('%s%s' %(word_schema,'rFonts')))
                         node = rPr[0]
                         node.set('%s%s' %(word_schema,'eastAsia'),errorlist[listCount]['rightValue'])
-                listCount = listCount + 1
+                listCount += 1
             elif errorlist[listCount]['type'] == 'fontEN':
                 for r in _iter(paragr,"r"):
                     found_rPr = False
@@ -345,13 +311,13 @@ def modify(xml_tree,errorlist):
                                 rPr.insert(0,etree.Element('%s%s' %(word_schema,'rFonts')))
                                 node = rPr[0]
                                 node.set('%s%s' %(word_schema,'ascii'),errorlist[listCount]['rightValue'])
-                    if found_rPr == False:
+                    if not found_rPr:
                         r.insert(0,etree.Element('%s%s' %(word_schema,'rPr')))
                         rPr = r[0]
                         rPr.insert(0,etree.Element('%s%s' %(word_schema,'rFonts')))
                         node = rPr[0]
                         node.set('%s%s' %(word_schema,'ascii'),errorlist[listCount]['rightValue'])
-                listCount = listCount + 1
+                listCount += 1
             elif errorlist[listCount]['type'] == 'fontTheme':
                 for rPr in _iter(paragr, "rPr"):
                     if rPr.getparent().tag != "%s%s" % (word_schema, "r"):
@@ -377,13 +343,13 @@ def modify(xml_tree,errorlist):
                                 rPr.insert(0,etree.Element('%s%s' %(word_schema,'sz')))
                                 node = rPr[0]
                                 node.set('%s%s' %(word_schema,'val'),errorlist[listCount]['rightValue'])
-                    if found_rPr == False:
+                    if not found_rPr:
                         r.insert(0,etree.Element('%s%s' %(word_schema,'rPr')))
                         rPr = r[0]
                         rPr.insert(0,etree.Element('%s%s' %(word_schema,'sz')))
                         node = rPr[0]
                         node.set('%s%s' %(word_schema,'val'),errorlist[listCount]['rightValue'])
-                listCount = listCount + 1
+                listCount += 1
             elif errorlist[listCount]['type'] == 'fontShape':
                 for r in _iter(paragr,"r"):
                     found_rPr = False
@@ -396,17 +362,17 @@ def modify(xml_tree,errorlist):
                                     found_node = True
                                     node.set('%s%s' %(word_schema,'val'),errorlist[listCount]['rightValue'])
                                     break
-                            if found_node == False:
+                            if not found_node:
                                 rPr.insert(0,etree.Element('%s%s' %(word_schema,'b')))
                                 node = rPr[0]
                                 node.set('%s%s' %(word_schema,'val'),errorlist[listCount]['rightValue'])
-                    if found_rPr == False:
+                    if not found_rPr:
                         r.insert(0,etree.Element('%s%s' %(word_schema,'rPr')))
                         rPr = r[0]
                         rPr.insert(0,etree.Element('%s%s' %(word_schema,'b')))
                         node = rPr[0]
                         node.set('%s%s' %(word_schema,'val'),errorlist[listCount]['rightValue'])
-                listCount = listCount + 1  
+                listCount += 1
             elif errorlist[listCount]['type'] == "ref":
                 flag = 0
                 refnum = 0
@@ -439,7 +405,7 @@ def modify(xml_tree,errorlist):
                                 num = 1
                             else:
                                 text.text = ''
-                listCount = listCount + 1  
+                listCount += 1
             elif errorlist[listCount]['type'] == "refVertAlign":
                 flag = 0
                 refnum = 0
@@ -481,7 +447,7 @@ def modify(xml_tree,errorlist):
                                 #print ref_value['ref']
                     if flag == 2 and fldflag == 0 and ref_value['ref'] != None: 
                         rlist.append(r)
-                listCount = listCount + 1
+                listCount += 1
             else:
                 listCount += 1
 
@@ -507,13 +473,14 @@ tmp_dir = tempfile.mkdtemp()
 #把原来的docx解压到临时目录
 zipF.extractall(tmp_dir)
 #把新的xml写到里面
-with open(os.path.join(tmp_dir,'word/document.xml'),'w') as f:
+with open(os.path.join(tmp_dir,'word/document.xml'),'w',encoding="utf-8") as f:
     xmlstr = etree.tostring (xml_tree, pretty_print=False,encoding="UTF-8").decode("utf-8")#此处不识别'gb2312'
     f.write(xmlstr)
 
 # Get a list of all the files in the original docx zipfile
 filenames = zipF.namelist()
 # Now, create the new zip file and add all the filex into the archive
+# zip_copy_filename = 'result.docx'
 zip_copy_filename = Data_DirPath + 'result.docx'
 with zipfile.ZipFile(zip_copy_filename, "w") as docx:
     for filename in filenames:

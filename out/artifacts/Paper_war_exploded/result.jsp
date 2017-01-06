@@ -10,7 +10,7 @@
     <link rel="stylesheet" type="text/css" href="css/css-title/demo.css" />
     <link rel="stylesheet" type="text/css" href="css/css-title/component.css" />
     <link rel="stylesheet" type="text/css" href="css/css-button/button.css" />
-    <link rel="stylesheet" href="dist/styles/Vidage.css" />
+    <%--<link rel="stylesheet" href="dist/styles/Vidage.css" />--%>
 
 </head>
 <body>
@@ -40,28 +40,13 @@
             <a href="checkWordWithComments.jsp?dirPath=<%=dirPath%>&fileName=<%=fileName%>">带有批注的原Word文档</a><br><br><br>
             <a class="button" href="index.jsp">回到首页</a>
             <br><br>
-            <p style="color:white">
+            <p style="color:red">
+                注意：批注里的warning表示本系统无法改正的错误，请手动修改
+            </p>
+            <p style="color:green">
                 Microsoft Office 2007及以上的版本可在菜单栏的审阅栏目下找到“比较”来比对修改前后的不同
             </p>
         </div>
     </div>
-
-    <div class="Vidage">
-        <div class="Vidage__image"></div>
-
-        <video id="VidageVideo" class="Vidage__video" preload="metadata" loop autoplay muted>
-            <source src="videos/bg.webm" type="video/webm">
-            <source src="videos/bg.mp4" type="video/mp4">
-        </video>
-
-        <div class="Vidage__backdrop"></div>
-    </div>
-
-
-    <!-- Vidage init -->
-    <script src="dist/scripts/Vidage.min.js"></script>
-    <script>
-        new Vidage('#VidageVideo');
-    </script>
 </body>
 </html>

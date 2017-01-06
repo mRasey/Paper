@@ -13,8 +13,8 @@
     <div class="container">
         <header class="codrops-header">
             <h1>北航毕设论文格式在线校正系统<span>（测试版）</span></h1>
+            <h2 style="color: red">似乎出了点问题@_@</h2>
         </header>
-        <img src="res/image/error.jpg"/><br>
         <div align="center" id="upSuc">
             <a class="button" href="index.jsp?">返回首页</a>
         </div>
